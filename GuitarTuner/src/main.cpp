@@ -2,25 +2,27 @@
 #include "Adafruit_GFX.h"
 #include "Adafruit_SSD1306.h"
 #include <Wire.h> 
-#include "arduinoFFT.h"
 #include <Fonts/FreeSerifBold9pt7b.h>
 
 
 #define OLED_RESET -1
 Adafruit_SSD1306 display(OLED_RESET); /* Object of class Adafruit_SSD1306 */
 
-#define SAMPLES 128             //SAMPLES-pt FFT. Must be a base 2 number. Max 128 for Arduino Uno.
-#define SAMPLING_FREQUENCY 2048 //Ts = Based on Nyquist, must be 2 times the highest expected frequency.
+// Sample Frequency in Hz
+const float sample_freq = 20000;
+float sample_freq_my;
+const int len = 300;
+short amp_arr[len]; //create vector of analog output values
 
- 
-arduinoFFT FFT = arduinoFFT();
-
-//FFT related variable definition
-unsigned int sampling_period_us;
+int i,k;
+long sum, sum_old;
+int thresh = 0;
+float freq_per = 0;
+byte pd_state = 0;
 unsigned long microseconds;
+int period = 0;
+int peak;
 
-double vReal[SAMPLES]; //create vector of size SAMPLES to hold real values
-double vImag[SAMPLES]; //create vector of size SAMPLES to hold imaginary values
 
 //definition of microphone properties (from MicSetup)
 const int Mic = A3;       //Analog Input Pin on Arduino
@@ -31,18 +33,71 @@ void setup() {
   pinMode(7, INPUT);
   pinMode(Mic, INPUT);
   pinMode(BuiltInLed, OUTPUT);
+  sum = 0;
+  pd_state = 0;
   display.begin(SSD1306_SWITCHCAPVCC, 0x3C); /* Initialize display with address 0x3C */
-//   display.clearDisplay(); /* Clear display */
-//   display.setFont(&FreeSerifBold9pt7b);
-//   display.setTextColor(WHITE);
-//   display.setTextSize(1); /* Select font size of text. Increases with size of argument. */
-//   display.setCursor(5,15);
-//   display.println("GuitarTuner");
-//   display.display();
-  sampling_period_us = round(1000000*(1.0/SAMPLING_FREQUENCY)); //Period in microseconds 
-//   delay(500);
+  display.clearDisplay(); /* Clear display */
+  display.setFont(&FreeSerifBold9pt7b);
+  display.setTextColor(WHITE);
+  display.setTextSize(1); /* Select font size of text. Increases with size of argument. */
+  display.setCursor(5,15);
+  display.println("GuitarTuner");
+  display.display();
+
+  delay(500);
 
 }
+
+void getSoundDataArr(short amp_arr[]){
+    microseconds=0;  
+    short temp=0;
+    for (size_t i = 0; i < len; i++)
+    {
+        unsigned long before = millis();
+        temp = analogRead(Mic);
+        unsigned long after = millis();
+        microseconds += (after - before);
+        amp_arr[i]=temp;
+    }
+}
+
+void autocorrelation(){
+    peak=false;
+  for(i=0; i < len; i++)
+  {
+    sum_old = sum;
+    sum = 0;
+    for(k=0; k < len-i; k++) sum += (amp_arr[k])*(amp_arr[k+i]);
+    
+    // Peak Detect State Machine
+    if (pd_state == 2 && (sum-sum_old) <=0) 
+    {
+      
+      peak=true;
+      period = i;
+      if (peak)
+      {
+        pd_state=3;
+      }
+    }
+    if (pd_state == 1 && (sum > thresh) && (sum-sum_old) > 0) pd_state = 2;
+    if (!i) {
+      thresh = sum * 0.5;
+      pd_state = 1;
+    }
+  }
+  // Frequency identified in Hz
+  sample_freq_my=(peak*1000)/microseconds;
+  freq_per = sample_freq/period;
+  display.clearDisplay(); /* Clear display */
+  display.setFont(&FreeSerifBold9pt7b);
+  display.setTextColor(WHITE);
+  display.setTextSize(1); /* Select font size of text. Increases with size of argument. */
+  display.setCursor(5,15);
+  display.println(freq_per);
+  display.display();
+  
+  }
 
 void loop() {
   if (digitalRead(7) == LOW)
@@ -55,6 +110,9 @@ void loop() {
     // display.println("Sygnal");
     // display.display();
     digitalWrite(BuiltInLed, HIGH);
+    getSoundDataArr(amp_arr);
+    autocorrelation();
+    delay(3000);
   }else{
     // display.clearDisplay();
     // display.setFont(&FreeSerifBold9pt7b);
@@ -66,32 +124,7 @@ void loop() {
     digitalWrite(BuiltInLed, LOW);
   }
 
-    for(int i=0; i<SAMPLES; i++){  /*SAMPLING*/
-        vReal[i] = analogRead(Mic);
-        vImag[i] = 0;
-        while(micros() < (microseconds + sampling_period_us)){
-
-        }
-    }
-
-    FFT.Windowing(vReal, SAMPLES, FFT_WIN_TYP_HAMMING, FFT_FORWARD);
-    FFT.Compute(vReal, vImag, SAMPLES, FFT_FORWARD);
-    FFT.ComplexToMagnitude(vReal, vImag, SAMPLES);
-
-    double Peak =FFT.MajorPeak(vReal, SAMPLES, SAMPLING_FREQUENCY);
-    Serial.println(Peak);
-    // double Peak = analogRead(Mic);
-    display.clearDisplay();
-    display.setFont(&FreeSerifBold9pt7b);
-    display.setTextColor(WHITE);
-    display.setTextSize(1); /* Select font size of text. Increases with size of argument. */
-    display.setCursor(5,15);
-    display.println(Peak);
-    display.display();
-    // while(1);
-    //Serial.println();
-    
-    //delay(3000);
+   
 }
   
 
